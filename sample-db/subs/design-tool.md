@@ -2,7 +2,7 @@
 title: デザインツール
 plan: Pro
 price: 1,800円/月
-renewal: "2026-09-01"
+renewal: 2026-09-01
 category: 制作
 ---
 
