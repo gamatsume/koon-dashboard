@@ -187,7 +187,13 @@ export function tableFrom(notes: DbNote[]): TableData {
     .sort((a, b) => a.title.localeCompare(b.title, "ja"))
     .map((note) => ({
       note,
-      cells: columns.map((c) => (note.meta[c] == null ? "" : String(note.meta[c]))),
+      cells: columns.map((c) =>
+        note.meta[c] == null
+          ? ""
+          : note.meta[c] instanceof Date
+            ? format(note.meta[c], "yyyy-MM-dd")
+            : String(note.meta[c]),
+      ),
     }));
   return { columns, rows };
 }
