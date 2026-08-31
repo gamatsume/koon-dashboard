@@ -2,6 +2,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import RefreshButton from "@/components/RefreshButton";
+import ThemeToggle from "@/components/ThemeToggle";
 import {
   DbNote,
   ScheduleEntry,
@@ -276,6 +277,7 @@ export default function Dashboard() {
             <Link href="/vault" className="text-sm text-zinc-500 hover:underline">
               Vault一覧
             </Link>
+            <ThemeToggle />
             <RefreshButton />
           </div>
         </header>
