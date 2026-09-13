@@ -73,7 +73,9 @@ function DocumentCard({ label, notes }: { label: string; notes: DbNote[] }) {
               {doc.title}
             </Link>
           </p>
-          <div className="prose prose-sm prose-zinc max-w-none dark:prose-invert">
+          {/* カード内では本文の見出しをカード見出し・文書タイトルより目立たせない。
+              prose-sm のままだと h1 が 30px になり、14px のカード見出しと階層が逆転する。 */}
+          <div className="prose prose-sm prose-zinc max-w-none dark:prose-invert prose-headings:mt-4 prose-headings:mb-1.5 prose-headings:text-sm prose-headings:font-semibold">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
           </div>
         </>
