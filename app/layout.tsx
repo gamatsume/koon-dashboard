@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Vaultダッシュボード",
-  description: "Obsidian vaultのノートを閲覧するダッシュボード",
+  description: "Obsidian の Markdown フォルダを表示するダッシュボード",
 };
 
 // 描画前に data-theme を確定させる。これが無いと初回表示で明→暗のちらつきが出る。

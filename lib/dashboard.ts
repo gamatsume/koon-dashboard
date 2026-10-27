@@ -6,22 +6,11 @@ import { differenceInCalendarDays, format, getDayOfYear, isValid } from "date-fn
 
 /* ========== 設定 ========== */
 
-export type ViewType =
-  | "checklist"
-  | "document"
-  | "schedule"
-  | "quote"
-  | "feed"
-  | "table"
-  | "note";
-
-export type ViewConfig = { type: ViewType; label: string };
-
-export type DashboardConfig = {
-  dbPath: string;
-  views: Record<string, ViewConfig>;
-  layout: { top: string[]; middle: string[]; bottom: string[] };
-};
+/**
+ * リポジトリ側に置く設定はデータの場所だけ。
+ * カードの見出し・ビューの種類・幅などは DB 側（フォルダ名と `_view.md`）で決める。
+ */
+export type DashboardConfig = { dbPath: string };
 
 export function loadConfig(): DashboardConfig {
   const raw = fs.readFileSync(path.join(process.cwd(), "dashboard.config.json"), "utf-8");
@@ -35,15 +24,78 @@ export function dbRoot(config?: DashboardConfig): string {
   return path.resolve(process.cwd(), expanded);
 }
 
+/* ========== ビューの種類 ========== */
+
+/** この並びがカードの並び順の初期値にもなる（ドラッグで並べ替えるまで） */
+export const VIEW_TYPES = [
+  "checklist",
+  "document",
+  "quote",
+  "schedule",
+  "feed",
+  "note",
+  "table",
+] as const;
+
+export type ViewType = (typeof VIEW_TYPES)[number];
+export type Width = 1 | 2 | 3;
+
+/** `view:` に書ける別名と、width を書かなかったときの幅 */
+const VIEWS: Record<ViewType, { aliases: string[]; defaultWidth: Width }> = {
+  checklist: { aliases: ["チェックリスト"], defaultWidth: 1 },
+  document: { aliases: ["ドキュメント", "文書"], defaultWidth: 1 },
+  quote: { aliases: ["格言"], defaultWidth: 1 },
+  schedule: { aliases: ["予定"], defaultWidth: 3 },
+  feed: { aliases: ["フィード"], defaultWidth: 1 },
+  note: { aliases: ["メモ", "一覧"], defaultWidth: 1 },
+  table: { aliases: ["表", "テーブル"], defaultWidth: 3 },
+};
+
+function normalizeViewType(value: unknown): ViewType | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  const lower = v.toLowerCase();
+  for (const type of VIEW_TYPES) {
+    if (type === lower || VIEWS[type].aliases.includes(v)) return type;
+  }
+  return null;
+}
+
+/* ========== プロパティ ========== */
+
+/** 左にあるものほど優先。どれも無ければファイル名 */
+const TITLE_KEYS = ["title", "name", "subject"];
+/** 左にあるものほど優先 */
+const SOURCE_KEYS = ["source", "from"];
+
+/** 画面表示用の文字列にする。日付は yyyy-MM-dd、リストはカンマ区切り */
+export function formatValue(value: unknown): string {
+  if (value == null) return "";
+  if (value instanceof Date) return isValid(value) ? format(value, "yyyy-MM-dd") : "";
+  if (Array.isArray(value)) return value.map(formatValue).filter(Boolean).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).trim();
+}
+
+function firstValue(meta: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const v = formatValue(meta[key]);
+    if (v) return v;
+  }
+  return null;
+}
+
 /* ========== ノート読み込み(寛容パース) ========== */
 
 export type DbNote = {
   folder: string;
   fileName: string; // 拡張子なし
-  slug: string; // folder/encodeURIComponent(fileName)
+  slug: string; // URL 用。フォルダ名とファイル名をそれぞれエンコードしたもの
   title: string;
   date: string | null; // yyyy-MM-dd(ソート用)
   dateLabel: string | null; // yyyy年M月d日(表示用)
+  source: string | null;
+  url: string | null; // http(s) のものだけ
   meta: Record<string, unknown>;
   content: string;
   excerpt: string;
@@ -81,14 +133,18 @@ function parseNote(folder: string, filePath: string): DbNote {
 
   const dateSource =
     toDate(meta.date) ?? toDate((fileName.match(/(\d{4}-\d{2}-\d{2})/) ?? [])[1]);
+  const url = formatValue(meta.url);
 
   return {
     folder,
     fileName,
-    slug: `${folder}/${encodeURIComponent(fileName)}`,
-    title: String(meta.title ?? meta.subject ?? fileName),
+    slug: `${encodeURIComponent(folder)}/${encodeURIComponent(fileName)}`,
+    title: firstValue(meta, TITLE_KEYS) ?? fileName,
     date: dateSource ? format(dateSource, "yyyy-MM-dd") : null,
     dateLabel: dateSource ? format(dateSource, "yyyy年M月d日") : null,
+    source: firstValue(meta, SOURCE_KEYS),
+    // javascript: などを踏ませないため、外部リンクにするのは http(s) だけ
+    url: /^https?:\/\//i.test(url) ? url : null,
     meta,
     content,
     excerpt: excerptFrom(content),
@@ -96,13 +152,27 @@ function parseNote(folder: string, filePath: string): DbNote {
   };
 }
 
-/** フォルダ直下の.mdを読み込む(README.mdは除外)。存在しなければ空配列。 */
+/**
+ * 新しいものが上。日付があればそれで、無ければファイル名で比べる。
+ *
+ * ファイル名から拾える日付は `YYYY-MM-DD` 形式だけなので（`2026_1019週` などは拾えない）、
+ * 日付を持たないノートもファイル名で新しい順になるようにしておく。
+ */
+function byNewestFirst(a: DbNote, b: DbNote): number {
+  return (b.date ?? "").localeCompare(a.date ?? "") || b.fileName.localeCompare(a.fileName, "ja");
+}
+
+/** フォルダの表示設定ノート。ノートとしては読まない */
+const VIEW_SETTINGS_FILE = "_view.md";
+const IGNORED_FILES = new Set(["README.md", VIEW_SETTINGS_FILE]);
+
+/** フォルダ直下の.mdを読み込む(README.md と設定ノートは除外)。存在しなければ空配列。 */
 export function getFolderNotes(folder: string, config?: DashboardConfig): DbNote[] {
   const dir = path.join(dbRoot(config), folder);
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith(".md") && e.name !== "README.md")
+    .filter((e) => e.isFile() && e.name.endsWith(".md") && !IGNORED_FILES.has(e.name))
     .map((e) => {
       try {
         return parseNote(folder, path.join(dir, e.name));
@@ -110,20 +180,181 @@ export function getFolderNotes(folder: string, config?: DashboardConfig): DbNote
         return null;
       }
     })
-    .filter((n): n is DbNote => n !== null);
+    .filter((n): n is DbNote => n !== null)
+    .sort(byNewestFirst);
+}
+
+/* ========== URL ========== */
+
+/** URL の1区間を元の名前に戻す。すでにデコード済みで渡されても壊れないようにする */
+export function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function isSafeSegment(name: string): boolean {
+  return (
+    name.length > 0 && name !== "." && name !== ".." && !name.includes("/") && !name.includes("\\")
+  );
+}
+
+export function categoryHref(folder: string): string {
+  return `/view/${encodeURIComponent(folder)}`;
 }
 
 export function getDbNoteBySlug(parts: string[]): DbNote | null {
-  const [folder, ...rest] = parts;
-  if (!folder || rest.length === 0) return null;
-  const fileName = rest.map(decodeURIComponent).join("/");
-  const filePath = path.join(dbRoot(), folder, `${fileName}.md`);
-  if (!filePath.startsWith(dbRoot()) || !fs.existsSync(filePath)) return null;
+  if (parts.length !== 2) return null;
+  const [folder, fileName] = parts.map(decodeSegment);
+  if (!isSafeSegment(folder) || !isSafeSegment(fileName) || !isCategoryFolderName(folder)) {
+    return null;
+  }
+  if (IGNORED_FILES.has(`${fileName}.md`)) return null;
+  const root = dbRoot();
+  const filePath = path.join(root, folder, `${fileName}.md`);
+  if (!filePath.startsWith(root + path.sep) || !fs.existsSync(filePath)) return null;
   try {
     return parseNote(folder, filePath);
   } catch {
     return null;
   }
+}
+
+/* ========== カテゴリ(フォルダ = カード) ========== */
+
+export type ViewSettings = {
+  view: ViewType;
+  hasSettingsFile: boolean;
+  width: Width;
+  show: string[];
+  hidden: boolean;
+  warnings: string[];
+};
+
+export type Category = {
+  folder: string;
+  label: string; // フォルダ名そのもの
+  settings: ViewSettings;
+  notes: DbNote[];
+};
+
+function toWidth(value: unknown): Width | null {
+  const n = Number(value);
+  return n === 1 || n === 2 || n === 3 ? n : null;
+}
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => formatValue(v)).filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function readViewSettings(dir: string): ViewSettings {
+  const defaults: ViewSettings = {
+    view: "note",
+    hasSettingsFile: false,
+    width: VIEWS.note.defaultWidth,
+    show: [],
+    hidden: false,
+    warnings: [],
+  };
+
+  const file = path.join(dir, VIEW_SETTINGS_FILE);
+  if (!fs.existsSync(file)) return defaults;
+
+  let meta: Record<string, unknown>;
+  try {
+    meta = matter(fs.readFileSync(file, "utf-8")).data ?? {};
+  } catch {
+    return {
+      ...defaults,
+      hasSettingsFile: true,
+      warnings: ["設定ノートのプロパティを読み取れませんでした。メモとして表示しています。"],
+    };
+  }
+
+  const warnings: string[] = [];
+
+  let view: ViewType = "note";
+  if (meta.view != null && meta.view !== "") {
+    const normalized = normalizeViewType(meta.view);
+    if (normalized) view = normalized;
+    else warnings.push(`view の値「${formatValue(meta.view)}」は不明です。メモとして表示しています。`);
+  }
+
+  let width = VIEWS[view].defaultWidth;
+  if (meta.width != null && meta.width !== "") {
+    const w = toWidth(meta.width);
+    if (w) width = w;
+    else warnings.push(`width は 1〜3 で指定してください（「${formatValue(meta.width)}」は無視しました）。`);
+  }
+
+  const show = toStringList(meta.show);
+  if (view === "checklist" && show.length > 0) {
+    warnings.push("チェックリストでは show は使えません。");
+  }
+
+  return { view, hasSettingsFile: true, width, show, hidden: meta.hidden === true, warnings };
+}
+
+function isCategoryFolderName(name: string): boolean {
+  return !name.startsWith(".") && !name.startsWith("_");
+}
+
+function buildCategory(root: string, folder: string): Category {
+  return {
+    folder,
+    label: folder,
+    settings: readViewSettings(path.join(root, folder)),
+    notes: getFolderNotes(folder),
+  };
+}
+
+/**
+ * DB直下のフォルダをカードとして列挙する。
+ * `_` や `.` で始まるフォルダ、ノートも設定ノートも無いフォルダ（画像置き場など）は出さない。
+ */
+export function listCategories(): Category[] {
+  const root = dbRoot();
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && isCategoryFolderName(e.name))
+    .map((e) => buildCategory(root, e.name))
+    .filter((c) => c.settings.hasSettingsFile || c.notes.length > 0)
+    .filter((c) => !c.settings.hidden)
+    .sort(
+      (a, b) =>
+        VIEW_TYPES.indexOf(a.settings.view) - VIEW_TYPES.indexOf(b.settings.view) ||
+        a.folder.localeCompare(b.folder, "ja"),
+    );
+}
+
+/** 1フォルダ分。非表示に設定したものも返す */
+export function getCategory(folder: string): Category | null {
+  if (!isSafeSegment(folder) || !isCategoryFolderName(folder)) return null;
+  const root = dbRoot();
+  const dir = path.join(root, folder);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return null;
+  return buildCategory(root, folder);
+}
+
+/* ========== プロパティの表示 ========== */
+
+export type PropertyEntry = { key: string; value: string };
+
+/** 設定ノートの show に書いたプロパティのうち、値のあるもの */
+export function shownProperties(note: DbNote, show: string[]): PropertyEntry[] {
+  return show
+    .map((key) => ({ key, value: formatValue(note.meta[key]) }))
+    .filter((p) => p.value !== "");
 }
 
 /* ========== ビュー型ごとの整形 ========== */
@@ -142,10 +373,10 @@ export function checklistFrom(notes: DbNote[]): { items: ChecklistItem[]; done: 
   return { items, done: items.filter((i) => i.done).length };
 }
 
-// document型: 最新(ファイル名降順)の1件
+// document型: 最新の1件
 export function latestOf(notes: DbNote[]): DbNote | null {
   if (notes.length === 0) return null;
-  return [...notes].sort((a, b) => b.fileName.localeCompare(a.fileName))[0];
+  return [...notes].sort(byNewestFirst)[0];
 }
 
 // schedule型: 日付昇順+残り日数
@@ -168,33 +399,26 @@ export function quoteOfToday(notes: DbNote[]): DbNote | null {
   return sorted[getDayOfYear(new Date()) % sorted.length];
 }
 
-// feed型: 日付降順
+// feed型: 新しい順
 export function feedFrom(notes: DbNote[]): DbNote[] {
-  return [...notes].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+  return [...notes].sort(byNewestFirst);
 }
 
-// table型: frontmatter項目の一覧表(列は出現順の和集合)
+// table型: show があればその列、無ければタイトル以外の全プロパティ(出現順)
 export type TableData = { columns: string[]; rows: { note: DbNote; cells: string[] }[] };
 
-export function tableFrom(notes: DbNote[]): TableData {
-  const columns: string[] = [];
-  for (const note of notes) {
-    for (const key of Object.keys(note.meta)) {
-      if (key !== "title" && !columns.includes(key)) columns.push(key);
+export function tableFrom(notes: DbNote[], show: string[] = []): TableData {
+  const columns: string[] = [...show];
+  if (show.length === 0) {
+    for (const note of notes) {
+      for (const key of Object.keys(note.meta)) {
+        if (!TITLE_KEYS.includes(key) && !columns.includes(key)) columns.push(key);
+      }
     }
   }
   const rows = [...notes]
     .sort((a, b) => a.title.localeCompare(b.title, "ja"))
-    .map((note) => ({
-      note,
-      cells: columns.map((c) =>
-        note.meta[c] == null
-          ? ""
-          : note.meta[c] instanceof Date
-            ? format(note.meta[c], "yyyy-MM-dd")
-            : String(note.meta[c]),
-      ),
-    }));
+    .map((note) => ({ note, cells: columns.map((c) => formatValue(note.meta[c])) }));
   return { columns, rows };
 }
 
