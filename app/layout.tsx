@@ -23,8 +23,11 @@ const themeScript = `(function(){try{var t=localStorage.getItem("theme");if(t!==
 
 export default function RootLayout({
   children,
+  modal,
 }: Readonly<{
   children: React.ReactNode;
+  // ノートをモーダルで重ねるためのスロット。開いていないときは null（app/@modal/default.tsx）
+  modal: React.ReactNode;
 }>) {
   return (
     <html
@@ -37,7 +40,10 @@ export default function RootLayout({
             ちらつき防止にはならない。ここは生の script である必要がある。 */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {modal}
+      </body>
     </html>
   );
 }
