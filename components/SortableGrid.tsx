@@ -1,12 +1,24 @@
 "use client";
 
-import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 /**
  * カードをドラッグ（または矢印キー）で並び替えるグリッド。
  *
  * 並び順はこのブラウザの localStorage にだけ保存する。アプリは DB に書き込まない方針なので、
  * 他の端末・ブラウザには反映されない。保存が無いときはサーバーから渡された順に並べる。
+ *
+ * 高さは Pinterest のように詰める。CSS グリッドは行の高さが揃ってしまうので、
+ * 行を 1px にしてカードの実測した高さぶんだけ行をまたがせる。
+ * 測る前（サーバー描画時やハイドレーション前）は、ふつうのグリッドとして出す。
  */
 
 export type GridItem = {
@@ -17,6 +29,9 @@ export type GridItem = {
 };
 
 const STORAGE_KEY = "koon-dashboard:card-order";
+
+/** カード同士の間隔(px)。行をまたぐ数の計算に使うので、クラスではなく数値で持つ */
+const GAP = 16;
 
 /**
  * 幅は6列ぶんで指定する。画面が狭いときは3列に畳み、その中での占有数に読み替える。
@@ -97,6 +112,39 @@ export default function SortableGrid({ items }: { items: GridItem[] }) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
+  // 高さを詰めるための実測。id ごとに「またぐ行数(px)」を持つ
+  const [spans, setSpans] = useState<Record<string, number>>({});
+  const nodes = useRef(new Map<string, HTMLElement>());
+  const packed = ids.length > 0 && ids.every((id) => spans[id] !== undefined);
+
+  const register = useCallback((id: string) => {
+    return (el: HTMLElement | null) => {
+      if (el) nodes.current.set(id, el);
+      else nodes.current.delete(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    function measure() {
+      setSpans((prev) => {
+        const next: Record<string, number> = {};
+        for (const [id, el] of nodes.current) {
+          next[id] = Math.ceil(el.getBoundingClientRect().height) + GAP;
+        }
+        const keys = Object.keys(next);
+        const same =
+          keys.length === Object.keys(prev).length && keys.every((k) => prev[k] === next[k]);
+        return same ? prev : next;
+      });
+    }
+
+    measure();
+    // 中身の変化（画像の読み込み、折り返し）と画面幅の変化の両方で測り直す
+    const observer = new ResizeObserver(measure);
+    for (const el of nodes.current.values()) observer.observe(el);
+    return () => observer.disconnect();
+  }, [ordered]);
+
   function move(from: number, to: number) {
     if (from < 0 || to < 0 || to >= ids.length || from === to) return;
     const next = [...ids];
@@ -125,11 +173,26 @@ export default function SortableGrid({ items }: { items: GridItem[] }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      <div
+        className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-6"
+        style={{
+          columnGap: GAP,
+          // 測れていれば 1px の行を高さぶんまたがせて詰める。測る前はふつうのグリッド
+          rowGap: packed ? 0 : GAP,
+          gridAutoRows: packed ? "1px" : "auto",
+          // 幅の広いカードが入りきらず空いた列に、後ろの小さいカードを回り込ませる。
+          // そのぶん小さいカードが前に出るので、見た目の並びは指定した順と前後することがある
+          gridAutoFlow: "row dense",
+        }}
+      >
         {ordered.map((item, index) => (
           <div
             key={item.id}
             data-card-id={item.id}
+            style={{
+              alignSelf: "start", // 行いっぱいに引き伸ばさない
+              gridRowEnd: packed ? `span ${spans[item.id]}` : undefined,
+            }}
             draggable={armed === item.id}
             onDragStart={(e) => {
               e.dataTransfer.effectAllowed = "move";
@@ -177,7 +240,8 @@ export default function SortableGrid({ items }: { items: GridItem[] }) {
             >
               ⠿
             </div>
-            {item.node}
+            {/* 実測する対象。カードそのものの高さを測りたいので、間隔は span 側に足す */}
+            <div ref={register(item.id)}>{item.node}</div>
           </div>
         ))}
       </div>

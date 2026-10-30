@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ROLE_KEYS, viewOptions } from "@/lib/dashboard";
+import { ROLE_KEYS, VIEW_PICK_NOTE, viewOptions } from "@/lib/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +160,9 @@ export default function ViewsPage() {
               本文が全文出るのは <C>document</C> と <C>quote</C> だけ
             </strong>
             です。ここが一番つまずきやすい点です。
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            {VIEW_PICK_NOTE}
           </p>
         </section>
 

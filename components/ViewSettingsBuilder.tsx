@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+// lib/dashboard.ts は fs を使うため、ここから値を import してはいけない。
+// 必要なものはサーバー側のページから props で受け取る。
 import type { ViewOption, ViewType, Width } from "@/lib/dashboard";
 
 /**
@@ -69,7 +71,13 @@ function buildFile(view: ViewType, width: Width, show: string[], hidden: boolean
   return `---\n${lines.join("\n")}\n---\n`;
 }
 
-export default function ViewSettingsBuilder({ views }: { views: ViewOption[] }) {
+export default function ViewSettingsBuilder({
+  views,
+  pickNote,
+}: {
+  views: ViewOption[];
+  pickNote: string;
+}) {
   const [view, setView] = useState<ViewType>("note");
   const [width, setWidth] = useState<Width>(2);
   const [showInput, setShowInput] = useState("");
@@ -138,6 +146,7 @@ export default function ViewSettingsBuilder({ views }: { views: ViewOption[] }) 
             </label>
           ))}
         </div>
+        <p className="mt-2 text-xs leading-relaxed text-zinc-500">{pickNote}</p>
       </fieldset>
 
       <fieldset>

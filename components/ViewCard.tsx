@@ -15,8 +15,9 @@ import {
   tableFrom,
 } from "@/lib/dashboard";
 
+// 高さは中身なりにする（グリッド側で詰めるため、行いっぱいに伸ばさない）
 const card =
-  "h-full rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900";
+  "rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900";
 const cardTitle = "text-sm font-semibold tracking-wide text-zinc-500 dark:text-zinc-400";
 const emptyText = "text-sm text-zinc-400";
 const internalTitle = "font-medium text-zinc-800 hover:underline dark:text-zinc-200";
@@ -141,8 +142,17 @@ function renderBody({ notes, settings }: Category): { extra?: ReactNode; body: R
       return {
         body: (
           <figure>
-            <blockquote className="border-l-2 border-zinc-300 pl-3 text-sm italic text-zinc-700 dark:border-zinc-600 dark:text-zinc-300">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{quote.content}</ReactMarkdown>
+            {/* 格言そのものをファイル名に書く使い方があるため、タイトルも出す。
+                本文は出典や補足であることが多いので、タイトルの下に控えめに添える。 */}
+            <blockquote className="border-l-2 border-zinc-300 pl-3 dark:border-zinc-600">
+              <p className="text-sm">
+                <NoteTitle note={quote} />
+              </p>
+              {quote.content.trim() && (
+                <div className="prose prose-sm prose-zinc mt-1 max-w-none text-zinc-600 dark:prose-invert dark:text-zinc-400 prose-p:my-1 prose-headings:mt-2 prose-headings:mb-1 prose-headings:text-sm prose-headings:font-semibold">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{quote.content}</ReactMarkdown>
+                </div>
+              )}
             </blockquote>
             {author && (
               <figcaption className="mt-2 text-right text-xs text-zinc-500">— {author}</figcaption>

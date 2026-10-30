@@ -1,6 +1,6 @@
 import Link from "next/link";
 import ViewSettingsBuilder from "@/components/ViewSettingsBuilder";
-import { viewOptions } from "@/lib/dashboard";
+import { VIEW_PICK_NOTE, viewOptions } from "@/lib/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export default function SettingsPage() {
           </p>
         </header>
 
-        <ViewSettingsBuilder views={viewOptions()} />
+        <ViewSettingsBuilder views={viewOptions()} pickNote={VIEW_PICK_NOTE} />
       </div>
     </div>
   );

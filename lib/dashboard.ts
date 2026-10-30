@@ -59,13 +59,13 @@ const VIEWS: Record<
   document: {
     aliases: ["ドキュメント", "文書"],
     defaultWidth: 2,
-    items: "最新1件",
+    items: "最新の1件",
     body: "全文",
   },
   quote: {
     aliases: ["格言"],
     defaultWidth: 2,
-    items: "日替わり1件",
+    items: "1件（日替わり）",
     body: "全文",
   },
   schedule: {
@@ -93,6 +93,15 @@ const VIEWS: Record<
     body: "使わない",
   },
 };
+
+/**
+ * document と quote は、どちらも「1件を全文」で見分けがつきにくい。
+ * 違いは選び方だけなので、表の下に添えて補う。
+ */
+export const VIEW_PICK_NOTE =
+  "document と quote は、どちらも1件を全文で出します。違うのは選び方だけです。" +
+  "document は常に最新の1件なので、より新しいノートを置くまで変わりません。" +
+  "quote は毎日1件ずつ順ぐりに変わり、フォルダ内のすべてがいずれ出ます。";
 
 export type ViewOption = {
   type: ViewType;
