@@ -12,14 +12,24 @@ import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 export type GridItem = {
   id: string;
   label: string;
-  width: 1 | 2 | 3;
+  width: 1 | 2 | 3 | 4 | 5 | 6;
   node: ReactNode;
 };
 
 const STORAGE_KEY = "koon-dashboard:card-order";
 
-// Tailwind はクラス名を静的に拾うので、組み立てずに全部書いておく
-const SPAN = { 1: "md:col-span-1", 2: "md:col-span-2", 3: "md:col-span-3" } as const;
+/**
+ * 幅は6列ぶんで指定する。画面が狭いときは3列に畳み、その中での占有数に読み替える。
+ * Tailwind はクラス名を静的に拾うので、組み立てずに全部書いておく。
+ */
+const SPAN = {
+  1: "lg:col-span-1 xl:col-span-1",
+  2: "lg:col-span-1 xl:col-span-2",
+  3: "lg:col-span-2 xl:col-span-3",
+  4: "lg:col-span-2 xl:col-span-4",
+  5: "lg:col-span-3 xl:col-span-5",
+  6: "lg:col-span-3 xl:col-span-6",
+} as const;
 
 /* ---- localStorage を外部ストアとして扱う（SSR 中は「保存なし」として描画する） ---- */
 
@@ -115,7 +125,7 @@ export default function SortableGrid({ items }: { items: GridItem[] }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         {ordered.map((item, index) => (
           <div
             key={item.id}

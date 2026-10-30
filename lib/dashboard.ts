@@ -38,18 +38,82 @@ export const VIEW_TYPES = [
 ] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
-export type Width = 1 | 2 | 3;
+export type Width = 1 | 2 | 3 | 4 | 5 | 6;
 
-/** `view:` に書ける別名と、width を書かなかったときの幅 */
-const VIEWS: Record<ViewType, { aliases: string[]; defaultWidth: Width }> = {
-  checklist: { aliases: ["チェックリスト"], defaultWidth: 1 },
-  document: { aliases: ["ドキュメント", "文書"], defaultWidth: 1 },
-  quote: { aliases: ["格言"], defaultWidth: 1 },
-  schedule: { aliases: ["予定"], defaultWidth: 3 },
-  feed: { aliases: ["フィード"], defaultWidth: 1 },
-  note: { aliases: ["メモ", "一覧"], defaultWidth: 1 },
-  table: { aliases: ["表", "テーブル"], defaultWidth: 3 },
+/**
+ * `view:` に書ける別名、width を書かなかったときの幅、画面に出す説明。
+ *
+ * 「表示のしかた」ページと設定画面は、どちらもここを読む。
+ * 挙動を変えたらここも直すこと。説明が実装とずれると、どちらのページも嘘になる。
+ */
+const VIEWS: Record<
+  ViewType,
+  { aliases: string[]; defaultWidth: Width; items: string; body: string }
+> = {
+  checklist: {
+    aliases: ["チェックリスト"],
+    defaultWidth: 2,
+    items: "全部",
+    body: "「- [ ]」の行だけ。他は出ない",
+  },
+  document: {
+    aliases: ["ドキュメント", "文書"],
+    defaultWidth: 2,
+    items: "最新1件",
+    body: "全文",
+  },
+  quote: {
+    aliases: ["格言"],
+    defaultWidth: 2,
+    items: "日替わり1件",
+    body: "全文",
+  },
+  schedule: {
+    aliases: ["予定"],
+    defaultWidth: 6,
+    items: "今日以降と日付なし",
+    body: "使わない",
+  },
+  feed: {
+    aliases: ["フィード"],
+    defaultWidth: 2,
+    items: "全部",
+    body: "最初の1行だけ",
+  },
+  note: {
+    aliases: ["メモ", "一覧"],
+    defaultWidth: 2,
+    items: "全部",
+    body: "最初の1行だけ",
+  },
+  table: {
+    aliases: ["表", "テーブル"],
+    defaultWidth: 6,
+    items: "全部",
+    body: "使わない",
+  },
 };
+
+export type ViewOption = {
+  type: ViewType;
+  name: string;
+  aliases: string[];
+  items: string;
+  body: string;
+  defaultWidth: Width;
+};
+
+/** 「表示のしかた」ページと設定画面に出すビューの一覧 */
+export function viewOptions(): ViewOption[] {
+  return VIEW_TYPES.map((type) => ({
+    type,
+    name: VIEWS[type].aliases[0],
+    aliases: VIEWS[type].aliases,
+    items: VIEWS[type].items,
+    body: VIEWS[type].body,
+    defaultWidth: VIEWS[type].defaultWidth,
+  }));
+}
 
 function normalizeViewType(value: unknown): ViewType | null {
   if (typeof value !== "string") return null;
@@ -67,6 +131,9 @@ function normalizeViewType(value: unknown): ViewType | null {
 const TITLE_KEYS = ["title", "name", "subject"];
 /** 左にあるものほど優先 */
 const SOURCE_KEYS = ["source", "from"];
+
+/** 役割が決まっているプロパティ。show に書かなくても表示される */
+export const ROLE_KEYS = [...TITLE_KEYS, "date", "url", ...SOURCE_KEYS, "author"];
 
 /** 画面表示用の文字列にする。日付は yyyy-MM-dd、リストはカンマ区切り */
 export function formatValue(value: unknown): string {
@@ -242,7 +309,7 @@ export type Category = {
 
 function toWidth(value: unknown): Width | null {
   const n = Number(value);
-  return n === 1 || n === 2 || n === 3 ? n : null;
+  return Number.isInteger(n) && n >= 1 && n <= 6 ? (n as Width) : null;
 }
 
 function toStringList(value: unknown): string[] {
@@ -293,7 +360,7 @@ function readViewSettings(dir: string): ViewSettings {
   if (meta.width != null && meta.width !== "") {
     const w = toWidth(meta.width);
     if (w) width = w;
-    else warnings.push(`width は 1〜3 で指定してください（「${formatValue(meta.width)}」は無視しました）。`);
+    else warnings.push(`width は 1〜6 で指定してください（「${formatValue(meta.width)}」は無視しました）。`);
   }
 
   const show = toStringList(meta.show);
@@ -321,7 +388,7 @@ function buildCategory(root: string, folder: string): Category {
  * DB直下のフォルダをカードとして列挙する。
  * `_` や `.` で始まるフォルダ、ノートも設定ノートも無いフォルダ（画像置き場など）は出さない。
  */
-export function listCategories(): Category[] {
+export function listCategories({ includeHidden = false } = {}): Category[] {
   const root = dbRoot();
   if (!fs.existsSync(root)) return [];
   return fs
@@ -329,7 +396,7 @@ export function listCategories(): Category[] {
     .filter((e) => e.isDirectory() && isCategoryFolderName(e.name))
     .map((e) => buildCategory(root, e.name))
     .filter((c) => c.settings.hasSettingsFile || c.notes.length > 0)
-    .filter((c) => !c.settings.hidden)
+    .filter((c) => includeHidden || !c.settings.hidden)
     .sort(
       (a, b) =>
         VIEW_TYPES.indexOf(a.settings.view) - VIEW_TYPES.indexOf(b.settings.view) ||

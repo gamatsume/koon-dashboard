@@ -17,7 +17,7 @@ export default async function CategoryPage({
 
   return (
     <div className="min-h-screen bg-zinc-50 px-4 py-8 dark:bg-black sm:px-8">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-[1600px]">
         <Link
           href="/"
           className="mb-6 inline-block text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
