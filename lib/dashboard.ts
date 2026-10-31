@@ -2,7 +2,15 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import matter from "gray-matter";
-import { differenceInCalendarDays, format, getDayOfYear, isValid } from "date-fns";
+import {
+  addDays,
+  differenceInCalendarDays,
+  format,
+  getDayOfYear,
+  isValid,
+  startOfWeek,
+  subDays,
+} from "date-fns";
 
 /* ========== 設定 ========== */
 
@@ -29,6 +37,7 @@ export function dbRoot(config?: DashboardConfig): string {
 /** この並びがカードの並び順の初期値にもなる（ドラッグで並べ替えるまで） */
 export const VIEW_TYPES = [
   "checklist",
+  "habit",
   "document",
   "quote",
   "schedule",
@@ -54,6 +63,12 @@ const VIEWS: Record<
     aliases: ["チェックリスト"],
     defaultWidth: 2,
     items: "全部",
+    body: "「- [ ]」の行だけ。他は出ない",
+  },
+  habit: {
+    aliases: ["習慣"],
+    defaultWidth: 2,
+    items: "今日の分（マス目には全部の記録を使う）",
     body: "「- [ ]」の行だけ。他は出ない",
   },
   document: {
@@ -240,7 +255,17 @@ function byNewestFirst(a: DbNote, b: DbNote): number {
 
 /** フォルダの表示設定ノート。ノートとしては読まない */
 const VIEW_SETTINGS_FILE = "_view.md";
-const IGNORED_FILES = new Set(["README.md", VIEW_SETTINGS_FILE]);
+
+/**
+ * ノートとして読む .md か。
+ *
+ * `_` で始まるものは設定やひな形とみなして読まない（`_view.md` `_template.md` など）。
+ * フォルダ名の規則と揃えてある。Obsidian で名前を付けると `.md` が自動で付くので
+ * `_view.md.md` のような取りこぼしが起きるが、その場合もノートとしては出さない。
+ */
+function isNoteFile(name: string): boolean {
+  return name.endsWith(".md") && !name.startsWith("_") && name !== "README.md";
+}
 
 /** フォルダ直下の.mdを読み込む(README.md と設定ノートは除外)。存在しなければ空配列。 */
 export function getFolderNotes(folder: string, config?: DashboardConfig): DbNote[] {
@@ -248,7 +273,7 @@ export function getFolderNotes(folder: string, config?: DashboardConfig): DbNote
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith(".md") && !IGNORED_FILES.has(e.name))
+    .filter((e) => e.isFile() && isNoteFile(e.name))
     .map((e) => {
       try {
         return parseNote(folder, path.join(dir, e.name));
@@ -287,7 +312,7 @@ export function getDbNoteBySlug(parts: string[]): DbNote | null {
   if (!isSafeSegment(folder) || !isSafeSegment(fileName) || !isCategoryFolderName(folder)) {
     return null;
   }
-  if (IGNORED_FILES.has(`${fileName}.md`)) return null;
+  if (!isNoteFile(`${fileName}.md`)) return null;
   const root = dbRoot();
   const filePath = path.join(root, folder, `${fileName}.md`);
   if (!filePath.startsWith(root + path.sep) || !fs.existsSync(filePath)) return null;
@@ -447,6 +472,72 @@ export function checklistFrom(notes: DbNote[]): { items: ChecklistItem[]; done: 
     }
   }
   return { items, done: items.filter((i) => i.done).length };
+}
+
+// habit型: 日付ごとのノートを1日分の記録として読み、今日の分と続き具合を出す
+export type HabitDay = { date: string; done: number; total: number };
+
+export type HabitSummary = {
+  /** 今日の日付のノート。無ければ null */
+  today: { items: ChecklistItem[]; done: number; total: number } | null;
+  byDate: Map<string, HabitDay>;
+  /** 全部できた日が、今日（まだなら昨日）から何日続いているか */
+  streak: number;
+  /** 全部できた日の数 */
+  completedDays: number;
+  /** 記録のある日の数 */
+  recordedDays: number;
+};
+
+export function habitFrom(notes: DbNote[]): HabitSummary {
+  const byDate = new Map<string, HabitDay>();
+  for (const note of notes) {
+    if (!note.date) continue; // 日付の読めないノートは記録として数えない
+    const { items, done } = checklistFrom([note]);
+    if (items.length === 0) continue;
+    byDate.set(note.date, { date: note.date, done, total: items.length });
+  }
+
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const todayNote = notes.find((n) => n.date === todayKey);
+  const todayList = todayNote ? checklistFrom([todayNote]) : null;
+
+  const isComplete = (key: string) => {
+    const day = byDate.get(key);
+    return !!day && day.total > 0 && day.done === day.total;
+  };
+
+  // 今日がまだ終わっていないうちは昨日から数える。朝に毎回 0日 と出ないようにするため
+  let cursor = isComplete(todayKey) ? new Date() : subDays(new Date(), 1);
+  let streak = 0;
+  while (isComplete(format(cursor, "yyyy-MM-dd"))) {
+    streak++;
+    cursor = subDays(cursor, 1);
+  }
+
+  return {
+    today: todayList
+      ? { items: todayList.items, done: todayList.done, total: todayList.items.length }
+      : null,
+    byDate,
+    streak,
+    completedDays: [...byDate.keys()].filter(isComplete).length,
+    recordedDays: byDate.size,
+  };
+}
+
+export type HabitCell = { date: string; day: HabitDay | null; future: boolean };
+
+/** 月曜はじまりの週を1列にした、直近 weeks 週ぶんのマス目 */
+export function habitGrid(byDate: Map<string, HabitDay>, weeks = 17): HabitCell[][] {
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const start = subDays(startOfWeek(new Date(), { weekStartsOn: 1 }), (weeks - 1) * 7);
+  return Array.from({ length: weeks }, (_, w) =>
+    Array.from({ length: 7 }, (_, d) => {
+      const key = format(addDays(start, w * 7 + d), "yyyy-MM-dd");
+      return { date: key, day: byDate.get(key) ?? null, future: key > todayKey };
+    }),
+  );
 }
 
 // document型: 最新の1件

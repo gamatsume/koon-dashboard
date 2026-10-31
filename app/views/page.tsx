@@ -61,7 +61,8 @@ export default function ViewsPage() {
               読むのは<strong>フォルダ直下の</strong> <C>.md</C> だけです。サブフォルダは読みません。
             </li>
             <li>
-              <C>README.md</C> と <C>_view.md</C> はノートとして扱いません。
+              <C>README.md</C> と、<C>_</C> で始まる <C>.md</C>（<C>_view.md</C>・
+              <C>_template.md</C> など）はノートとして扱いません。
             </li>
             <li>
               名前が <C>_</C> <C>.</C> で始まるフォルダと、<C>.md</C>{" "}
