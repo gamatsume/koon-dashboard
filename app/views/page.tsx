@@ -165,6 +165,11 @@ export default function ViewsPage() {
           <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
             {VIEW_PICK_NOTE}
           </p>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+            <C>document</C> と <C>habit</C> は<strong>1枚ずつ出すカード</strong>です。カードの上の ‹ ›
+            で前後のノートに送れ、一覧から選んで飛ぶこともできます。送る先はフォルダに実際にあるノートなので、
+            記録の無い日は飛ばされます。<C>habit</C> は推移タブのマス目を押しても、その日の記録へ飛べます。
+          </p>
         </section>
 
         <section className={section}>
@@ -192,7 +197,7 @@ export default function ViewsPage() {
                     <C>date</C>
                   </td>
                   <td className={td}>
-                    日付（無ければファイル名の <C>YYYY-MM-DD</C>）
+                    日付（無ければファイル名の <C>YYYY-MM-DD</C> か <C>YYYYMMDD</C>）
                   </td>
                 </tr>
                 <tr>
@@ -239,8 +244,8 @@ export default function ViewsPage() {
               ノートは<strong>新しい順</strong>です。日付の降順 → 日付が無ければファイル名の降順。
             </li>
             <li>
-              ファイル名から日付として拾えるのは <C>YYYY-MM-DD</C> の形だけです（
-              <C>2026_1019週</C> は拾えません）。
+              ファイル名から日付として拾えるのは <C>YYYY-MM-DD</C> と、先頭にある{" "}
+              <C>YYYYMMDD</C> です（<C>2026_1019週</C> は拾えません）。
             </li>
             <li>
               <C>schedule</C> だけは、次に来る予定を上にするため<strong>日付の昇順</strong>です。
@@ -253,7 +258,117 @@ export default function ViewsPage() {
         </section>
 
         <section className={section}>
-          <h2 className={heading}>6. 置き方と反映</h2>
+          <h2 className={heading}>6. 習慣（habit）の使い方</h2>
+          <p className="mb-3 text-sm text-zinc-700 dark:text-zinc-300">
+            他のビューと違い、<strong>1日1ノート</strong>で記録します。ファイル名を日付にしてください。
+          </p>
+          <pre className="mb-4 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
+            <code>{`習慣/
+├── _view.md          view: habit
+├── _template.md      その日のぶんのひな形
+├── 2026-10-31.md     - [x] ストレッチ
+└── 2026-11-01.md     - [ ] ストレッチ`}</code>
+          </pre>
+
+          <h3 className="mb-2 text-sm font-semibold text-black dark:text-zinc-50">3つのタブ</h3>
+          <div className="mb-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className={th}>タブ</th>
+                  <th className={th}>出るもの</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className={td}>今日</td>
+                  <td className={td}>
+                    今日のチェックリストと、連続 / 全部できた日 / 記録日数。 ‹ ›
+                    で前の日の記録に送れます
+                  </td>
+                </tr>
+                <tr>
+                  <td className={td}>推移</td>
+                  <td className={td}>
+                    日ごとの積み上げ棒グラフ（直近30日）と、17週間のマス目。
+                    棒は1マスがタスク1つで、できたぶんだけ下から埋まります
+                  </td>
+                </tr>
+                <tr>
+                  <td className={td}>タスク別</td>
+                  <td className={td}>タスクごとの連続回数と達成率</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="mb-2 text-sm font-semibold text-black dark:text-zinc-50">
+            ひな形（<C>_template.md</C>）
+          </h3>
+          <p className="mb-2 text-sm text-zinc-700 dark:text-zinc-300">
+            毎日の項目を書いておき、その日のノートを作るときにコピーして使います。
+            行末の目印で、出す日を絞れます。
+          </p>
+          <pre className="mb-2 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
+            <code>{`- [ ] ストレッチ
+- [ ] 読書を30分
+- [ ] 週次レビュー @月
+- [ ] 家計の確認 @1`}</code>
+          </pre>
+          <div className="mb-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th className={th}>目印</th>
+                  <th className={th}>意味</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className={td}>なし</td>
+                  <td className={td}>毎日</td>
+                </tr>
+                <tr>
+                  <td className={td}>
+                    <C>@月</C>〜<C>@日</C>
+                  </td>
+                  <td className={td}>その曜日だけ</td>
+                </tr>
+                <tr>
+                  <td className={td}>
+                    <C>@1</C>〜<C>@31</C>
+                  </td>
+                  <td className={td}>その日だけ</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            目印はひな形のための決まりです。<strong>アプリはひな形を読みません</strong>
+            （<C>_</C> で始まるファイルはノートとして扱わないため）。
+            その日のノートを作るときに、該当しない行を消してください。
+          </p>
+
+          <h3 className="mt-4 mb-2 text-sm font-semibold text-black dark:text-zinc-50">
+            数えかた
+          </h3>
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
+            <li>
+              <strong>連続</strong>は、その日のチェックが<strong>すべて</strong>付いた日だけを数えます。
+              今日がまだ終わっていないうちは昨日から数えるので、朝に毎回 0日 とは出ません。
+            </li>
+            <li>
+              <strong>タスク別の連続</strong>は、そのタスクが<strong>出てきた日だけ</strong>を見ます。
+              週1のタスクでも、出番のない日で途切れません。
+            </li>
+            <li>
+              タスクは<strong>本文の文字で見分けます</strong>。書き方を変えると別のタスクとして数え直しになります。
+            </li>
+          </ul>
+        </section>
+
+        <section className={section}>
+          <h2 className={heading}>7. 置き方と反映</h2>
           <ol className="list-decimal space-y-1.5 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
             <li>
               <Link href="/settings" className="underline">

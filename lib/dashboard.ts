@@ -8,6 +8,7 @@ import {
   format,
   getDayOfYear,
   isValid,
+  parseISO,
   startOfWeek,
   subDays,
 } from "date-fns";
@@ -68,13 +69,13 @@ const VIEWS: Record<
   habit: {
     aliases: ["習慣"],
     defaultWidth: 2,
-    items: "今日の分（マス目には全部の記録を使う）",
+    items: "1日ぶんずつ（既定は今日。マス目には全部の記録を使う）",
     body: "「- [ ]」の行だけ。他は出ない",
   },
   document: {
     aliases: ["ドキュメント", "文書"],
     defaultWidth: 2,
-    items: "最新の1件",
+    items: "1件ずつ（既定は最新）",
     body: "全文",
   },
   quote: {
@@ -115,7 +116,7 @@ const VIEWS: Record<
  */
 export const VIEW_PICK_NOTE =
   "document と quote は、どちらも1件を全文で出します。違うのは選び方だけです。" +
-  "document は常に最新の1件なので、より新しいノートを置くまで変わりません。" +
+  "document は既定で最新の1件を出し、送り操作で過去の分も見られます。" +
   "quote は毎日1件ずつ順ぐりに変わり、フォルダ内のすべてがいずれ出ます。";
 
 export type ViewOption = {
@@ -207,6 +208,19 @@ function excerptFrom(content: string): string {
   return (line ?? "").replace(/^[-*]\s*(\[[ xX]\]\s*)?/, "").trim();
 }
 
+/**
+ * ファイル名から日付を拾う。`2026-11-05` と `20261105` のどちらも読む。
+ *
+ * 8桁は先頭にあるものだけを見る。本文的な数字（`1500シネマ` など）を
+ * うっかり日付として拾わないようにするため。
+ */
+function dateFromFileName(fileName: string): Date | null {
+  const hyphen = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  if (hyphen) return toDate(hyphen[1]);
+  const plain = fileName.match(/^(\d{4})(\d{2})(\d{2})(?!\d)/);
+  return plain ? toDate(`${plain[1]}-${plain[2]}-${plain[3]}`) : null;
+}
+
 function parseNote(folder: string, filePath: string): DbNote {
   const fileName = path.basename(filePath, ".md");
   const raw = fs.readFileSync(filePath, "utf-8");
@@ -222,8 +236,7 @@ function parseNote(folder: string, filePath: string): DbNote {
     broken = true; // frontmatterが壊れていても生の本文として表示する
   }
 
-  const dateSource =
-    toDate(meta.date) ?? toDate((fileName.match(/(\d{4}-\d{2}-\d{2})/) ?? [])[1]);
+  const dateSource = toDate(meta.date) ?? dateFromFileName(fileName);
   const url = formatValue(meta.url);
 
   return {
@@ -476,31 +489,69 @@ export function checklistFrom(notes: DbNote[]): { items: ChecklistItem[]; done: 
 
 // habit型: 日付ごとのノートを1日分の記録として読み、今日の分と続き具合を出す
 export type HabitDay = { date: string; done: number; total: number };
+export type HabitCell = { date: string; day: HabitDay | null; future: boolean };
 
-export type HabitSummary = {
-  /** 今日の日付のノート。無ければ null */
-  today: { items: ChecklistItem[]; done: number; total: number } | null;
-  byDate: Map<string, HabitDay>;
-  /** 全部できた日が、今日（まだなら昨日）から何日続いているか */
+/** タスク1つぶんの成績。出てこなかった日は数えない（週1のタスクでも連続が途切れない） */
+export type HabitTask = {
+  text: string;
+  /** 直近の出番から数えて、続けてできている回数 */
   streak: number;
-  /** 全部できた日の数 */
-  completedDays: number;
-  /** 記録のある日の数 */
-  recordedDays: number;
+  done: number;
+  appeared: number;
 };
 
-export function habitFrom(notes: DbNote[]): HabitSummary {
-  const byDate = new Map<string, HabitDay>();
+/**
+ * 画面に渡す習慣の集計。
+ * クライアント側のタブで使うので、Map を持たせずそのまま渡せる形にしてある。
+ */
+/** 1日ぶんの記録。日付を前後に動かして1日ずつ見る */
+export type HabitEntry = {
+  date: string;
+  /** 送り操作に出す見出し。`2026年11月5日(水)` */
+  label: string;
+  items: ChecklistItem[];
+  done: number;
+  total: number;
+};
+
+export type HabitStats = {
+  /** 記録のある日。新しい順。記録の無い日は入らない */
+  days: HabitEntry[];
+  /** 今日の日付。既定でこの日を開く。記録が無ければ days には入っていない */
+  todayDate: string;
+  /** マス目。週ごとの列 */
+  cells: HabitCell[][];
+  /** 棒グラフ用。直近ぶんを日付の昇順で */
+  bars: HabitDay[];
+  /** 全部できた日が、今日（まだなら昨日）から何日続いているか */
+  streak: number;
+  completedDays: number;
+  recordedDays: number;
+  tasks: HabitTask[];
+};
+
+export function habitStats(
+  notes: DbNote[],
+  { weeks = 17, barDays = 30 } = {},
+): HabitStats {
+  // 日付ごとの項目。日付の読めないノートは記録として数えない
+  const itemsByDate = new Map<string, ChecklistItem[]>();
   for (const note of notes) {
-    if (!note.date) continue; // 日付の読めないノートは記録として数えない
-    const { items, done } = checklistFrom([note]);
-    if (items.length === 0) continue;
-    byDate.set(note.date, { date: note.date, done, total: items.length });
+    if (!note.date) continue;
+    const { items } = checklistFrom([note]);
+    if (items.length > 0) itemsByDate.set(note.date, items);
   }
 
+  const dayOf = (items: ChecklistItem[], date: string): HabitDay => ({
+    date,
+    done: items.filter((i) => i.done).length,
+    total: items.length,
+  });
+  const byDate = new Map<string, HabitDay>(
+    [...itemsByDate].map(([date, items]) => [date, dayOf(items, date)]),
+  );
+
   const todayKey = format(new Date(), "yyyy-MM-dd");
-  const todayNote = notes.find((n) => n.date === todayKey);
-  const todayList = todayNote ? checklistFrom([todayNote]) : null;
 
   const isComplete = (key: string) => {
     const day = byDate.get(key);
@@ -515,35 +566,69 @@ export function habitFrom(notes: DbNote[]): HabitSummary {
     cursor = subDays(cursor, 1);
   }
 
-  return {
-    today: todayList
-      ? { items: todayList.items, done: todayList.done, total: todayList.items.length }
-      : null,
-    byDate,
-    streak,
-    completedDays: [...byDate.keys()].filter(isComplete).length,
-    recordedDays: byDate.size,
-  };
-}
-
-export type HabitCell = { date: string; day: HabitDay | null; future: boolean };
-
-/** 月曜はじまりの週を1列にした、直近 weeks 週ぶんのマス目 */
-export function habitGrid(byDate: Map<string, HabitDay>, weeks = 17): HabitCell[][] {
-  const todayKey = format(new Date(), "yyyy-MM-dd");
-  const start = subDays(startOfWeek(new Date(), { weekStartsOn: 1 }), (weeks - 1) * 7);
-  return Array.from({ length: weeks }, (_, w) =>
+  // マス目: 月曜はじまりの週を1列にする
+  const gridStart = subDays(startOfWeek(new Date(), { weekStartsOn: 1 }), (weeks - 1) * 7);
+  const cells = Array.from({ length: weeks }, (_, w) =>
     Array.from({ length: 7 }, (_, d) => {
-      const key = format(addDays(start, w * 7 + d), "yyyy-MM-dd");
+      const key = format(addDays(gridStart, w * 7 + d), "yyyy-MM-dd");
       return { date: key, day: byDate.get(key) ?? null, future: key > todayKey };
     }),
   );
+
+  // 棒グラフ: 記録のある日だけを直近から
+  const bars = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-barDays);
+
+  // タスク別: 新しい日から順に、出番のあった日だけを見る
+  const datesDesc = [...itemsByDate.keys()].sort((a, b) => b.localeCompare(a));
+  const names: string[] = [];
+  for (const date of [...datesDesc].reverse()) {
+    for (const item of itemsByDate.get(date) ?? []) {
+      if (!names.includes(item.text)) names.push(item.text);
+    }
+  }
+
+  const tasks: HabitTask[] = names.map((text) => {
+    const history = datesDesc
+      .map((date) => ({ date, item: itemsByDate.get(date)?.find((i) => i.text === text) }))
+      .filter((h): h is { date: string; item: ChecklistItem } => !!h.item);
+
+    // 今日の出番がまだ終わっていないなら、そこは飛ばして前の出番から数える
+    const countFrom = history[0]?.date === todayKey && !history[0].item.done ? 1 : 0;
+    let taskStreak = 0;
+    for (let i = countFrom; i < history.length && history[i].item.done; i++) taskStreak++;
+
+    return {
+      text,
+      streak: taskStreak,
+      done: history.filter((h) => h.item.done).length,
+      appeared: history.length,
+    };
+  });
+
+  return {
+    days: datesDesc.map((date) => {
+      const items = itemsByDate.get(date) ?? [];
+      return {
+        date,
+        label: dayLabel(date),
+        items,
+        done: items.filter((i) => i.done).length,
+        total: items.length,
+      };
+    }),
+    todayDate: todayKey,
+    cells,
+    bars,
+    streak,
+    completedDays: [...byDate.keys()].filter(isComplete).length,
+    recordedDays: byDate.size,
+    tasks,
+  };
 }
 
-// document型: 最新の1件
-export function latestOf(notes: DbNote[]): DbNote | null {
-  if (notes.length === 0) return null;
-  return [...notes].sort(byNewestFirst)[0];
+// document型: 新しい順に並べ、1枚ずつ出す。前後に動かして過去の分を見る
+export function documentsFrom(notes: DbNote[]): DbNote[] {
+  return [...notes].sort(byNewestFirst);
 }
 
 // schedule型: 日付昇順+残り日数
@@ -589,8 +674,16 @@ export function tableFrom(notes: DbNote[], show: string[] = []): TableData {
   return { columns, rows };
 }
 
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** `2026-11-05` または Date を `2026年11月5日(水)` にする */
+export function dayLabel(value: string | Date): string {
+  const d = typeof value === "string" ? parseISO(value) : value;
+  return `${format(d, "yyyy年M月d日")}(${WEEKDAYS[d.getDay()]})`;
+}
+
 export function todayLabel(): string {
   const d = new Date();
-  const week = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+  const week = WEEKDAYS[d.getDay()];
   return `${format(d, "yyyy年M月d日")}(${week})`;
 }

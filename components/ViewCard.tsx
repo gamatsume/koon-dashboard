@@ -1,17 +1,17 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import CardPager from "@/components/CardPager";
+import HabitCard from "@/components/HabitCard";
 import remarkGfm from "remark-gfm";
 import {
   type Category,
   type DbNote,
-  type HabitCell,
   categoryHref,
   checklistFrom,
   feedFrom,
-  habitFrom,
-  habitGrid,
-  latestOf,
+  documentsFrom,
+  habitStats,
   quoteOfToday,
   scheduleFrom,
   shownProperties,
@@ -88,45 +88,6 @@ function ChecklistItems({ items }: { items: { text: string; done: boolean }[] })
   );
 }
 
-/**
- * マス目1つの濃さ。達成率が高いほど地色との差が大きくなる。
- * 記録の無い日も薄く塗る。塗らないとマス目が歯抜けに見えて、暦として読めなくなるため。
- */
-function cellClass(cell: HabitCell): string {
-  if (cell.future) return "bg-transparent";
-  if (!cell.day) return "bg-zinc-100 dark:bg-zinc-800/70"; // 記録なし
-  const ratio = cell.day.total > 0 ? cell.day.done / cell.day.total : 0;
-  if (ratio >= 1) return "bg-zinc-800 dark:bg-zinc-100";
-  if (ratio >= 2 / 3) return "bg-zinc-600 dark:bg-zinc-300";
-  if (ratio >= 1 / 3) return "bg-zinc-400 dark:bg-zinc-500";
-  if (ratio > 0) return "bg-zinc-300 dark:bg-zinc-600";
-  return "bg-zinc-200 dark:bg-zinc-700"; // 記録はあるが1つもできていない
-}
-
-function HabitGrid({ columns }: { columns: HabitCell[][] }) {
-  return (
-    <div className="-mx-1 overflow-x-auto px-1">
-      <div className="flex gap-[3px]">
-        {columns.map((week, w) => (
-          <div key={w} className="flex flex-col gap-[3px]">
-            {week.map((cell) => (
-              <div
-                key={cell.date}
-                title={
-                  cell.day
-                    ? `${cell.date} ${cell.day.done}/${cell.day.total}`
-                    : `${cell.date} 記録なし`
-                }
-                className={`h-3 w-3 rounded-[2px] ${cellClass(cell)}`}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function daysBadge(daysLeft: number | null) {
   if (daysLeft === null) return <span className="shrink-0 text-xs text-zinc-400">日付なし</span>;
   if (daysLeft === 0)
@@ -164,67 +125,31 @@ function renderBody({ notes, settings }: Category): { extra?: ReactNode; body: R
     }
 
     case "habit": {
-      const habit = habitFrom(notes);
-      return {
-        extra: habit.today ? (
-          <span className="ml-2 font-normal">
-            {habit.today.done}/{habit.today.total} 完了
-          </span>
-        ) : undefined,
-        body: (
-          <>
-            {habit.today ? (
-              <ChecklistItems items={habit.today.items} />
-            ) : (
-              <p className={emptyText}>今日のノートがありません</p>
-            )}
-
-            <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              <div className="flex items-baseline gap-1.5">
-                <dt className="text-xs text-zinc-500">連続</dt>
-                <dd className="font-medium text-zinc-800 dark:text-zinc-200">
-                  {habit.streak}日
-                </dd>
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <dt className="text-xs text-zinc-500">全部できた日</dt>
-                <dd className="font-medium text-zinc-800 dark:text-zinc-200">
-                  {habit.completedDays}日
-                </dd>
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <dt className="text-xs text-zinc-500">記録</dt>
-                <dd className="font-medium text-zinc-800 dark:text-zinc-200">
-                  {habit.recordedDays}日
-                </dd>
-              </div>
-            </dl>
-
-            <div className="mt-3">
-              <HabitGrid columns={habitGrid(habit.byDate)} />
-            </div>
-          </>
-        ),
-      };
+      return { body: <HabitCard stats={habitStats(notes)} /> };
     }
 
     case "document": {
-      const doc = latestOf(notes);
-      if (!doc) return { body: <p className={emptyText}>ドキュメントなし</p> };
+      const docs = documentsFrom(notes);
+      if (docs.length === 0) return { body: <p className={emptyText}>ドキュメントなし</p> };
       return {
         body: (
-          <>
-            <p className="text-sm">
-              <NoteTitle note={doc} />
-            </p>
-            <MetaLine note={doc} />
-            <ShownProperties note={doc} show={show} />
-            {/* カード内では本文の見出しをカード見出し・文書タイトルより目立たせない。
-                prose-sm のままだと h1 が 30px になり、14px のカード見出しと階層が逆転する。 */}
-            <div className="prose prose-sm prose-zinc mt-2 max-w-none dark:prose-invert prose-headings:mt-4 prose-headings:mb-1.5 prose-headings:text-sm prose-headings:font-semibold">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
-            </div>
-          </>
+          <CardPager
+            labels={docs.map((doc) => doc.dateLabel ?? doc.fileName)}
+            pages={docs.map((doc) => (
+              <div key={doc.slug}>
+                <p className="text-sm">
+                  <NoteTitle note={doc} />
+                </p>
+                <MetaLine note={doc} />
+                <ShownProperties note={doc} show={show} />
+                {/* カード内では本文の見出しをカード見出し・文書タイトルより目立たせない。
+                    prose-sm のままだと h1 が 30px になり、14px のカード見出しと階層が逆転する。 */}
+                <div className="prose prose-sm prose-zinc mt-2 max-w-none dark:prose-invert prose-headings:mt-4 prose-headings:mb-1.5 prose-headings:text-sm prose-headings:font-semibold">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.content}</ReactMarkdown>
+                </div>
+              </div>
+            ))}
+          />
         ),
       };
     }

@@ -71,25 +71,16 @@ function buildFile(view: ViewType, width: Width, show: string[], hidden: boolean
   return `---\n${lines.join("\n")}\n---\n`;
 }
 
-export default function ViewSettingsBuilder({
-  views,
-  pickNote,
-}: {
-  views: ViewOption[];
-  pickNote: string;
-}) {
-  const [view, setView] = useState<ViewType>("note");
-  const [width, setWidth] = useState<Width>(2);
-  const [showInput, setShowInput] = useState("");
-  const [hidden, setHidden] = useState(false);
+/** 習慣のひな形の初期値。目印の書き方が分かるように1つずつ例を入れてある */
+const DEFAULT_TEMPLATE = `- [ ] ストレッチ
+- [ ] 読書を30分
+- [ ] 週次レビュー @月
+- [ ] 家計の確認 @1`;
+
+/** 作ったファイルの受け取り口。コピーとダウンロード、それに中身の表示 */
+function FileBlock({ name, text }: { name: string; text: string }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-
-  const show = showInput
-    .split(/[,、\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const text = buildFile(view, width, show, hidden);
 
   async function copy() {
     const ok = await copyText(text);
@@ -103,11 +94,54 @@ export default function ViewSettingsBuilder({
     const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = "_view.md";
+    a.download = name;
     a.click();
     // すぐ revoke するとダウンロードが中断されることがある
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-xs text-zinc-500">{name}</span>
+        <button type="button" onClick={copy} className={`ml-auto ${button}`}>
+          コピー
+        </button>
+        <button type="button" onClick={download} className={button}>
+          ダウンロード
+        </button>
+        {copied && <span className="text-xs text-zinc-500">コピーしました</span>}
+      </div>
+      {copyFailed && (
+        <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+          コピーできませんでした。下のテキストを選択してコピーしてください。
+        </p>
+      )}
+      <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
+        <code>{text}</code>
+      </pre>
+    </div>
+  );
+}
+
+export default function ViewSettingsBuilder({
+  views,
+  pickNote,
+}: {
+  views: ViewOption[];
+  pickNote: string;
+}) {
+  const [view, setView] = useState<ViewType>("note");
+  const [width, setWidth] = useState<Width>(2);
+  const [showInput, setShowInput] = useState("");
+  const [hidden, setHidden] = useState(false);
+  const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+
+  const show = showInput
+    .split(/[,、\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const text = buildFile(view, width, show, hidden);
 
   return (
     <div className="space-y-6">
@@ -191,25 +225,29 @@ export default function ViewSettingsBuilder({
         このカードを出さない
       </label>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={copy} className={button}>
-            コピー
-          </button>
-          <button type="button" onClick={download} className={button}>
-            ダウンロード
-          </button>
-          {copied && <span className="text-xs text-zinc-500">コピーしました</span>}
-        </div>
-        {copyFailed && (
-          <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-            コピーできませんでした。下のテキストを選択してコピーしてください。
+      {view === "habit" && (
+        <div>
+          <label className={legend} htmlFor="template">
+            習慣のひな形（_template.md）
+          </label>
+          <p className="mt-1 text-xs text-zinc-500">
+            毎日の項目を書きます。行末に @月 や @1 を付けると、その曜日・その日だけの項目という目印になります。
+            アプリはひな形を読まないので、日々のノートを作るときに該当しない行を消してください。
           </p>
-        )}
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
-          <code>{text}</code>
-        </pre>
-      </div>
+          <textarea
+            id="template"
+            rows={5}
+            value={template}
+            onChange={(e) => setTemplate(e.target.value)}
+            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+          />
+        </div>
+      )}
+
+      <FileBlock name="_view.md" text={text} />
+      {view === "habit" && (
+        <FileBlock name="_template.md" text={`${template.replace(/\s+$/, "")}\n`} />
+      )}
     </div>
   );
 }
