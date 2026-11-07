@@ -221,7 +221,11 @@ function dateFromFileName(fileName: string): Date | null {
   return plain ? toDate(`${plain[1]}-${plain[2]}-${plain[3]}`) : null;
 }
 
-function parseNote(folder: string, filePath: string): DbNote {
+/**
+ * @param folder カードになっているフォルダ名
+ * @param relPath そのフォルダから見た `.md` までの相対パス（`過去/2026-11-02.md` など）
+ */
+function parseNote(folder: string, filePath: string, relPath: string): DbNote {
   const fileName = path.basename(filePath, ".md");
   const raw = fs.readFileSync(filePath, "utf-8");
 
@@ -242,7 +246,8 @@ function parseNote(folder: string, filePath: string): DbNote {
   return {
     folder,
     fileName,
-    slug: `${encodeURIComponent(folder)}/${encodeURIComponent(fileName)}`,
+    // 下のフォルダにあるノートも指せるように、区間ごとに符号化してつなぐ
+    slug: [folder, ...relPath.slice(0, -3).split(path.sep)].map(encodeURIComponent).join("/"),
     title: firstValue(meta, TITLE_KEYS) ?? fileName,
     date: dateSource ? format(dateSource, "yyyy-MM-dd") : null,
     dateLabel: dateSource ? format(dateSource, "yyyy年M月d日") : null,
@@ -280,22 +285,48 @@ function isNoteFile(name: string): boolean {
   return name.endsWith(".md") && !name.startsWith("_") && name !== "README.md";
 }
 
-/** フォルダ直下の.mdを読み込む(README.md と設定ノートは除外)。存在しなければ空配列。 */
+/**
+ * ノートを探しに入るフォルダか。
+ *
+ * ファイルの規則と揃えてある。`_下書き` のように `_` を付ければ、
+ * カードに出したくないノートの置き場にできる。
+ */
+function isNoteFolder(name: string): boolean {
+  return !name.startsWith("_") && !name.startsWith(".");
+}
+
+/** これ以上は下に入らない。入れ子の深いフォルダを延々とたどらないための歯止め */
+const MAX_NOTE_DEPTH = 5;
+
+/**
+ * カードのフォルダにある .md を読み込む(README.md と設定ノートは除外)。
+ *
+ * 下のフォルダもたどる。`過去/` のような入れ物に古いノートを移しても、
+ * 集計や送り操作から外れないようにするため。存在しなければ空配列。
+ */
 export function getFolderNotes(folder: string, config?: DashboardConfig): DbNote[] {
-  const dir = path.join(dbRoot(config), folder);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && isNoteFile(e.name))
-    .map((e) => {
-      try {
-        return parseNote(folder, path.join(dir, e.name));
-      } catch {
-        return null;
+  const base = path.join(dbRoot(config), folder);
+  if (!fs.existsSync(base)) return [];
+
+  const notes: DbNote[] = [];
+  const walk = (dir: string, rel: string, depth: number) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        // シンボリックリンクは isDirectory() が false になるので、輪にはならない
+        if (depth > 0 && isNoteFolder(entry.name)) walk(full, path.join(rel, entry.name), depth - 1);
+      } else if (entry.isFile() && isNoteFile(entry.name)) {
+        try {
+          notes.push(parseNote(folder, full, path.join(rel, entry.name)));
+        } catch {
+          // 読めないノートは飛ばす
+        }
       }
-    })
-    .filter((n): n is DbNote => n !== null)
-    .sort(byNewestFirst);
+    }
+  };
+  walk(base, "", MAX_NOTE_DEPTH);
+
+  return notes.sort(byNewestFirst);
 }
 
 /* ========== URL ========== */
@@ -320,17 +351,23 @@ export function categoryHref(folder: string): string {
 }
 
 export function getDbNoteBySlug(parts: string[]): DbNote | null {
-  if (parts.length !== 2) return null;
-  const [folder, fileName] = parts.map(decodeSegment);
-  if (!isSafeSegment(folder) || !isSafeSegment(fileName) || !isCategoryFolderName(folder)) {
-    return null;
-  }
+  if (parts.length < 2) return null;
+  const decoded = parts.map(decodeSegment);
+  if (!decoded.every(isSafeSegment)) return null;
+
+  const [folder, ...rest] = decoded;
+  const subFolders = rest.slice(0, -1);
+  const fileName = rest[rest.length - 1];
+  // 一覧で読むときと同じ決まりで絞る。一覧に出ないノートはここからも開けない
+  if (!isCategoryFolderName(folder) || !subFolders.every(isNoteFolder)) return null;
   if (!isNoteFile(`${fileName}.md`)) return null;
+
+  const relPath = path.join(...subFolders, `${fileName}.md`);
   const root = dbRoot();
-  const filePath = path.join(root, folder, `${fileName}.md`);
+  const filePath = path.join(root, folder, relPath);
   if (!filePath.startsWith(root + path.sep) || !fs.existsSync(filePath)) return null;
   try {
-    return parseNote(folder, filePath);
+    return parseNote(folder, filePath, relPath);
   } catch {
     return null;
   }
@@ -537,7 +574,8 @@ export function habitStats(
   // 日付ごとの項目。日付の読めないノートは記録として数えない
   const itemsByDate = new Map<string, ChecklistItem[]>();
   for (const note of notes) {
-    if (!note.date) continue;
+    // 同じ日付のノートが複数あっても1日は1枚ぶん。新しい順で先に来たほうを使う
+    if (!note.date || itemsByDate.has(note.date)) continue;
     const { items } = checklistFrom([note]);
     if (items.length > 0) itemsByDate.set(note.date, items);
   }

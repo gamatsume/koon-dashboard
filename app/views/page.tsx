@@ -58,15 +58,18 @@ export default function ViewsPage() {
               <strong>フォルダ名がそのままカードの見出し</strong>です。
             </li>
             <li>
-              読むのは<strong>フォルダ直下の</strong> <C>.md</C> だけです。サブフォルダは読みません。
+              フォルダの中の <C>.md</C> を読みます。<strong>下のフォルダもたどります</strong>。
+              <C>過去/</C> のような入れ物に古いノートを移しても、カードや集計から外れません。
             </li>
             <li>
               <C>README.md</C> と、<C>_</C> で始まる <C>.md</C>（<C>_view.md</C>・
               <C>_template.md</C> など）はノートとして扱いません。
             </li>
             <li>
-              名前が <C>_</C> <C>.</C> で始まるフォルダと、<C>.md</C>{" "}
-              が1つも無いフォルダはカードになりません。
+              名前が <C>_</C> <C>.</C>{" "}
+              で始まるフォルダは、カードにもなりませんし、たどる先にもなりません（
+              <C>_下書き/</C> のように、出したくないノートの置き場に使えます）。
+              <C>.md</C> が1つも無いフォルダもカードになりません。
             </li>
           </ul>
         </section>
@@ -267,7 +270,9 @@ export default function ViewsPage() {
 ├── _view.md          view: habit
 ├── _template.md      その日のぶんのひな形
 ├── 2026-10-31.md     - [x] ストレッチ
-└── 2026-11-01.md     - [ ] ストレッチ`}</code>
+├── 2026-11-01.md     - [ ] ストレッチ
+└── 過去/             下のフォルダのぶんも数えます
+    └── 2026-09-30.md`}</code>
           </pre>
 
           <h3 className="mb-2 text-sm font-semibold text-black dark:text-zinc-50">3つのタブ</h3>
@@ -356,6 +361,10 @@ export default function ViewsPage() {
             <li>
               <strong>連続</strong>は、その日のチェックが<strong>すべて</strong>付いた日だけを数えます。
               今日がまだ終わっていないうちは昨日から数えるので、朝に毎回 0日 とは出ません。
+            </li>
+            <li>
+              同じ日付のノートが2枚あるときは、<strong>1日ぶんとして1枚だけ</strong>
+              数えます（新しい順で先に来たほう）。
             </li>
             <li>
               <strong>タスク別の連続</strong>は、そのタスクが<strong>出てきた日だけ</strong>を見ます。
